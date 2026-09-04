@@ -1,11 +1,32 @@
-from fastapi import FastAPI, HTTPException, status
-from pydantic import BaseModel, Field
+import time
 from typing import Optional, Dict
+from fastapi import FastAPI, HTTPException, Request, status
+from pydantic import BaseModel, Field
 
 app = FastAPI(
     title="API de Alumnos - Programación III",
     version="1.0.0"
 )
+
+# ------------------------------------------------------------------------------
+# 0. MIDDLEWARE DE DIAGNÓSTICO Y MÉTRICAS DE RENDIMIENTO (EJERCICIO 1)
+# ------------------------------------------------------------------------------
+@app.middleware("http")
+async def medir_tiempo_procesamiento(request: Request, call_next):
+    # 1. Captura el tiempo exacto antes de ingresar al handler/endpoint
+    tiempo_inicio = time.time()
+    
+    # 2. Transfiere el control al endpoint correspondiente
+    response = await call_next(request)
+    
+    # 3. Calcula la duración del procesamiento tras recibir la respuesta
+    tiempo_total = time.time() - tiempo_inicio
+    
+    # 4. Inyecta el encabezado HTTP personalizado en la respuesta saliente
+    response.headers["X-Process-Time"] = f"{tiempo_total:.4f}s"
+    
+    return response
+
 
 # ------------------------------------------------------------------------------
 # 1. MODELOS DE DATOS (Pydantic Schemas)
@@ -22,7 +43,6 @@ class AlumnoCreate(AlumnoBase):
     pass
 
 # Esquema para actualización parcial (PATCH)
-# Todos los campos son opcionales para permitir modificar solo lo necesario
 class AlumnoUpdatePartial(BaseModel):
     nombre: Optional[str] = Field(None, example="Juan Carlos Perez")
     dni: Optional[str] = Field(None, min_length=7, max_length=8, example="40123456")
@@ -47,9 +67,11 @@ current_id = 2
 # 3. ENDPOINTS DE LA API (CRUD)
 # ------------------------------------------------------------------------------
 
-# GET - Obtener todos los alumnos
+# GET - Obtener todos los alumnos (Con simulación para medir tiempo)
 @app.get("/alumnos", response_model=Dict[str, dict], status_code=status.HTTP_200_OK)
-def get_todos_los_alumnos():
+async def get_todos_los_alumnos():
+    # Simulación de un retardo en el procesamiento para evidenciar la métrica del middleware
+    time.sleep(0.3)
     return {"data": db_alumnos}
 
 
@@ -90,7 +112,6 @@ def reemplazar_alumno(alumno_id: int, alumno_data: AlumnoCreate):
             detail=f"Alumno con ID {alumno_id} no encontrado para actualizar"
         )
     
-    # PUT exige sobrescribir el objeto entero con los datos enviados
     alumno_reemplazado = {
         "id": alumno_id,
         "nombre": alumno_data.nombre,
@@ -112,10 +133,8 @@ def actualizar_parcial_alumno(alumno_id: int, alumno_data: AlumnoUpdatePartial):
         )
     
     alumno_existente = db_alumnos[alumno_id]
-    # Extraemos solo los campos recibidos en el request body que NO sean None
     datos_a_actualizar = alumno_data.model_dump(exclude_unset=True)
     
-    # Se actualizan únicamente las llaves provistas sin borrar las demás
     alumno_existente.update(datos_a_actualizar)
     db_alumnos[alumno_id] = alumno_existente
     
